@@ -88,7 +88,10 @@ def build_dataloader(config, mode, device, use_dali=False, seed=None):
     else:
         batch_transform = None
 
-    dataset = eval(dataset_name)(**config_dataset)
+    if dataset_name == 'MixDataset':
+        dataset = eval(dataset_name)(config_dataset['datasets']) 
+    else:
+        dataset = eval(dataset_name)(**config_dataset)
 
     logger.debug("build dataset({}) success...".format(dataset))
 
