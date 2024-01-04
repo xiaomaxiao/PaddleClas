@@ -94,7 +94,7 @@ DataLoader:
                 to_rgb: True
                 channel_first: False
             - RandCropImage:
-                sclae: [0.9, 1.0]
+                scale: [0.9, 1.0]
                 size: 192
             - RandFlipImage:
                 flip_code: 1
