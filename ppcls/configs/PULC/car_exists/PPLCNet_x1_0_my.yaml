@@ -87,7 +87,7 @@ DataLoader:
       -
         name: ImageNetDataset
         image_root: ./dataset/car_exists/
-        cls_label_path: ./dataset/car_exists/train_list.txt
+        cls_label_path: ./dataset/car_exists/train_online_list.txt
         transform_ops:
           - DecodeImage:
               to_rgb: True
