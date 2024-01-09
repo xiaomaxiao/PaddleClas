@@ -1,42 +1,11 @@
 
+from typing import Any
 import cv2 
 import os 
 import time 
 import uuid 
-import multiprocessing
 import numpy as np 
 import onnxruntime as ort 
-
-from multiprocessing import Queue, Process
-from typing import Any
-
-def init_session(onnx_path,use_gpu):
-    providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if use_gpu else ['CPUExecutionProvider']
-    sess = ort.InferenceSession(onnx_path, providers=providers)
-    return sess
-
-class PickableInferenceSession: # This is a wrapper to make the current InferenceSession class pickable.
-    def __init__(self, onnx_path, use_gpu):
-        self.onnx_path = onnx_path 
-        self.use_gpu = use_gpu
-        self.sess = init_session(self.onnx_path, use_gpu)
-
-    def run(self, *args):
-        return self.sess.run(*args)
-
-    def get_inputs(self):
-        return self.sess.get_inputs()
-
-    def get_outputs(self):
-        return self.sess.get_outputs()
-
-    def __getstate__(self):
-        return {'onnx_path': self.onnx_path, 'use_gpu': self.use_gpu}
-
-    def __setstate__(self, values):
-        self.onnx_path = values['onnx_path']
-        self.use_gpu = values['use_gpu']
-        self.sess = init_session(self.onnx_path, self.use_gpu)
 
 class TruckDetection:
     def __init__(self, 
@@ -48,14 +17,13 @@ class TruckDetection:
                  labels = ['no_car','contain_car'],
                  use_gpu = True):
 
-        # providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if use_gpu else ['CPUExecutionProvider']
-        # opts = ort.SessionOptions()
+        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if use_gpu else ['CPUExecutionProvider']
+        opts = ort.SessionOptions()
         # opts.enable_profiling = False
         # opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL 
-        # self.ort_session = ort.InferenceSession(onnx_path,opts,providers=providers)
-        # print(self.ort_session.get_providers())
 
-        self.ort_session = PickableInferenceSession(onnx_path,use_gpu)
+        self.ort_session = ort.InferenceSession(onnx_path,opts,providers=providers)
+        print(self.ort_session.get_providers())
         
         self.input_name = self.ort_session.get_inputs()[0].name
         self.output_name = self.ort_session.get_outputs()[0].name
@@ -143,30 +111,59 @@ class TruckInfo:
     def update_truck_state(self, cur_time:str, car_exist:bool, car_no:str):
         pass 
 
-class TruckMonitor(Process):
+class TruckMonitor:
+    def __init__(self) -> None:
+        self.truck_exist_threshold = 60
+        self.truck_exist_times = 0 
+
+    def __call__(self):
+
+        # 1. push q_car_exist
+
+        # 2. if SAILING and chepai meishibiedao 
+        #    push q_plate
+
+        # 3. trigger , reset 
+        pass 
+
+# 24.3760b342fed9dbb91e58bc2c104ff19f.2592000.1707363605.282335-25562841
+class Review:
     def __init__(self,
-                 q_car_exist 
-                 ):
-        super(Process, self).__init__()
+                 onnx_path,
+                 threshold = 0.5,
+                 use_gpu = True,
+                 collect_sample = False):
+        self.threshold = threshold
+        self.detect_truck = TruckDetection(onnx_path, threshold = threshold, use_gpu=use_gpu)
+        self.collect_sample = collect_sample
+        if self.collect_sample:
+            self.dir_bk = r"badcase\bk"
+            self.dir_truck = r"badcase\truck"
+            os.makedirs(self.dir_bk, exist_ok=True)
+            os.makedirs(self.dir_truck, exist_ok=True)
 
-        self.q_car_exist = q_car_exist
-        self.detect_truck = TruckDetection(r"d:\Code\PaddleClas\output\PPLCNet_x1_0\inference20240108.onnx",
-                                           threshold = 0.5, use_gpu=True)
-        self.running = True
-
-    def _detect(self, img):
-        res = self.detect_truck(img)
-        return res 
-
-    def run(self):
+    def _save_badcase(self,img,pred_info):
+        class_id = pred_info['class_ids'] 
+        score = pred_info['scores']
+        if score < 0.6:
+            save_dir = self.dir_bk if class_id == 0 else self.dir_truck
+            cv2.imwrite(os.path.join(save_dir, "{}_{:.4f}.jpg".format(str(uuid.uuid1()),score)), img)
+            
+    def __call__(self, video_path):
         cv2.namedWindow('frame', cv2.WINDOW_NORMAL)
         cv2.resizeWindow('frame', 800, 600)
+        vid = cv2.VideoCapture(video_path)
+        fps, width, height = vid.get(5), vid.get(3), vid.get(4)
+        print('fps： {} w: {} h: {}'.format(fps, width, height))
 
+        ret, frame = vid.read()
         x, y, w, h, use_roi = 0, 0, 0, 0, False
         count = 0 
         res, exist_car_info = {'class_ids': -1, 'scores': -1, 'label_name': 'None'} , 'None'
-        while self.running:
-            frame = self.q_car_exist.get()
+        while vid.isOpened():
+            ret, frame = vid.read()
+            if not ret:
+                continue 
             count += 1
             draw_frame = np.copy(frame)
 
@@ -174,16 +171,19 @@ class TruckMonitor(Process):
                 if count % 25 == 0:
                     beg_time = time.time()
                     crop_img = frame[y:y+h,x:x+w]
-                    res = self._detect(crop_img)
+                    res = self.detect_truck(crop_img)
                     end_time = time.time()
                     print(res, ' cost_time: {:.4f} ms'.format((end_time - beg_time) * 1000))
 
-                if res['class_ids'] == 1:
-                    exist_car_info = 'contain_car score: {:.4}'.format(res['scores'])
-                elif res['class_ids'] == 0:
-                    exist_car_info = 'no_car socre: {:.4}'.format(res['scores'])
-                else:
-                    exist_car_info = 'None'
+                #     if self.collect_sample:
+                #         self._save_badcase(crop_img,res)
+
+                # if res['class_ids'] == 1:
+                #     exist_car_info = 'contain_car score: {:.4}'.format(res['scores'])
+                # elif res['class_ids'] == 0:
+                #     exist_car_info = 'no_car socre: {:.4}'.format(res['scores'])
+                # else:
+                #     exist_car_info = 'None'
 
                 # draw info
                 cv2.rectangle(draw_frame, pt1=(x,y), pt2=(x+w,y+h), color=(0,0,255), thickness=3)
@@ -202,38 +202,14 @@ class TruckMonitor(Process):
                 use_roi = True
             else:
                 pass 
-
-
-# 24.3760b342fed9dbb91e58bc2c104ff19f.2592000.1707363605.282335-25562841
-class PreView:
-    def __init__(self, max_q_size = 1000):
-        self.q_car_exist = Queue(maxsize = max_q_size)
-        self.truckMonitor = TruckMonitor(q_car_exist=self.q_car_exist)
-
-    def __call__(self, video_path):
-        self.truckMonitor.start()
-        vid = cv2.VideoCapture(video_path)
-        fps, width, height = vid.get(5), vid.get(3), vid.get(4)
-        print('fps： {} w: {} h: {}'.format(fps, width, height))
-
-        ret, frame = vid.read()
-        count = 0 
-        while vid.isOpened():
-            ret, frame = vid.read()
-            if not ret:
-                continue 
-
-            if self.q_car_exist.full():
-                self.q_car_exist.get()
-            self.q_car_exist.put(frame)
-
+            
         vid.release()
-        self.truckMonitor.join()
+        cv2.destroyAllWindows()
+    
 
 
 if __name__ == "__main__":
-    multiprocessing.set_start_method('spawn')
-    review = PreView()
+    review = Review(r"d:\Code\PaddleClas\output\PPLCNet_x1_0\inference20240108.onnx",use_gpu=False,collect_sample=True)
     review(r"rtsp://admin:tenglong12345@117.78.18.244:5541/Streaming/Channels/901")
     # review(r"d:\Code\test\videos\cainiao20240107-0739-1.mp4")
     
