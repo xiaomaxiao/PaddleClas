@@ -1,4 +1,5 @@
 
+from typing import Any
 import cv2 
 import os 
 import time 
@@ -6,7 +7,7 @@ import uuid
 import numpy as np 
 import onnxruntime as ort 
 
-class Predictor:
+class TruckDetection:
     def __init__(self, 
                  onnx_path,
                  scale = 1.0 / 255.0,
@@ -76,7 +77,58 @@ class Predictor:
         predictions = self._postprocess_pred(outputs[0])
         return predictions
 
+class PlateRecognition:
+    def __init__(self, url:str):
+        self.url = url 
+    
+    def __call__(self, img) -> Any:
+       pass  
 
+class TruckState:
+    INITIAL = 0  # 初始
+    DOCKED = 1  # 停靠
+    DEPARTED = 2  # 离港
+    SAILING = 3 # 行驶中
+
+class TruckInfo:
+    def __init__(self):
+        self.enter_time = None
+        self.leave_time = None
+        self.truck_state = TruckState.EMPTY
+
+        self.seq_plate_info = []  # list[dict]
+        self.last_plate_info = None  
+        self.plate_reg_times = 0 
+        self.max_plate_reg_times = 10
+
+    def reset(self):
+        self.enter_time = None
+        self.leave_time = None
+        self.cur_state = TruckState.INITIAL
+        self.plate_info = []
+        self.plate_reg_times = 0
+
+    def update_truck_state(self, cur_time:str, car_exist:bool, car_no:str):
+        pass 
+
+    
+
+class TruckMonitor:
+    def __init__(self) -> None:
+        self.truck_exist_threshold = 60
+        self.truck_exist_times = 0 
+
+    def __call__(self):
+
+        # 1. push q_car_exist
+
+        # 2. if SAILING and chepai meishibiedao 
+        #    push q_plate
+
+        # 3. trigger , reset 
+        pass 
+
+# 24.3760b342fed9dbb91e58bc2c104ff19f.2592000.1707363605.282335-25562841
 class Review:
     def __init__(self,
                  onnx_path,
@@ -84,7 +136,7 @@ class Review:
                  use_gpu = True,
                  collect_sample = False):
         self.threshold = threshold
-        self.predictor = Predictor(onnx_path, threshold = threshold, use_gpu=use_gpu)
+        self.detect_truck = TruckDetection(onnx_path, threshold = threshold, use_gpu=use_gpu)
         self.collect_sample = collect_sample
         if self.collect_sample:
             self.dir_bk = r"badcase\bk"
@@ -110,7 +162,7 @@ class Review:
         x, y, w, h, use_roi = 0, 0, 0, 0, False
         count = 0 
         res, exist_car_info = {'class_ids': -1, 'scores': -1, 'label_name': 'None'} , 'None'
-        while True:
+        while vid.isOpened():
             ret, frame = vid.read()
             if not ret:
                 continue 
@@ -121,7 +173,7 @@ class Review:
                 if count % 25 == 0:
                     beg_time = time.time()
                     crop_img = frame[y:y+h,x:x+w]
-                    res = self.predictor(crop_img)
+                    res = self.detect_truck(crop_img)
                     end_time = time.time()
                     print(res, ' cost_time: {:.4f} ms'.format((end_time - beg_time) * 1000))
 
@@ -159,7 +211,7 @@ class Review:
 
 
 if __name__ == "__main__":
-    review = Review(r"d:\Code\PaddleClas\output\PPLCNet_x1_0\inference.onnx",use_gpu=False,collect_sample=True)
+    review = Review(r"d:\Code\PaddleClas\output\PPLCNet_x1_0\inference20240108.onnx",use_gpu=False,collect_sample=True)
     review(r"rtsp://admin:tenglong12345@117.78.18.244:5541/Streaming/Channels/901")
     # review(r"d:\Code\test\videos\cainiao20240107-0739-1.mp4")
     
